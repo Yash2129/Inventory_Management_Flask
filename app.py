@@ -1,12 +1,25 @@
-from flask import Flask, render_template, url_for, request, redirect
+from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
+from flask import render_template, request, session, redirect, url_for, flash
+import re
+from sqlalchemy.orm import sessionmaker, relationship
 from collections import defaultdict
 from datetime import datetime
 
+
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///inventory.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.secret_key = "super secret key"
 db = SQLAlchemy(app)
 
+
+class Userstore(db.Model):
+    __tablename__ = 'userstore'
+    id = db.Column(db.Integer, primary_key=True)
+    uname = db.Column(db.String(20))
+    password = db.Column(db.String(20))
+    date_created = db.Column(db.DateTime, default=datetime.utcnow())
 
 class Product(db.Model):
 
@@ -41,8 +54,69 @@ class ProductMovement(db.Model):
     
     def __repr__(self):
         return '<ProductMovement %r>' % self.movement_id
-
+with app.app_context():
+    db.create_all()
 @app.route('/', methods=["POST", "GET"])
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if 'username' in session:                # Checking for session login
+        return redirect('/home')
+
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+
+        usr = Userstore.query.filter_by(uname = username).first()
+        if usr == None:
+            flash('User Not Found', category='error')
+            return redirect('/login')
+
+        elif username == usr.uname and password == usr.password:
+            session['username'] = username  # saving session for login
+            return redirect('/home')
+
+        else:
+            flash('Wrong Credentials. Check Username and Password Again', category="error")
+
+    return render_template("login.html")
+
+
+@app.route('/registration', methods=['GET', 'POST'])
+def registration():
+    if request.method == 'POST':
+        uname = request.form['uname']
+        password = request.form['pass']
+        cnfrm_password = request.form['cpass']
+
+        query = Userstore.query.filter_by(uname=uname).first()
+
+        if query != None:
+            if uname == str(query.uname):
+                flash('Username already taken')
+                return redirect('/registration')
+
+        if password != cnfrm_password:
+            flash('Passwords do not match')
+            return redirect('/registration')
+
+        regex = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!#%*?&]{6,20}$"
+        pattern = re.compile(regex)
+
+        match = re.search(pattern, password)
+
+        if match:
+            user = Userstore(uname=uname, password=password)
+            db.session.add(user)
+            db.session.commit()
+            flash('Staff Registred Successfully', category='info')
+            return redirect('/login')
+        else:
+            flash('Password should contain one Uppercase, one special character, one numeric character')
+            return redirect('/registration')
+    return render_template('staff_registration.html')
+
+
+@app.route('/home', methods=['GET', 'POST'])
 def index():
         
     if (request.method == "POST") and ('product_name' in request.form):
@@ -52,7 +126,7 @@ def index():
         try:
             db.session.add(new_product)
             db.session.commit()
-            return redirect("/")
+            return redirect("/home")
         
         except:
             return "There Was an issue while add a new Product"
@@ -64,7 +138,7 @@ def index():
         try:
             db.session.add(new_location)
             db.session.commit()
-            return redirect("/")
+            return redirect("/home")
         
         except:
             return "There Was an issue while add a new Location"
@@ -336,3 +410,4 @@ def updateProductInMovements(oldProduct, newProduct):
 
 if (__name__ == "__main__"):
     app.run(debug=True)
+    app.secret_key = "super secret key"
